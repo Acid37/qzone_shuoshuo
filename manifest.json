@@ -1,0 +1,74 @@
+{
+  "name": "qzone_shuoshuo",
+  "version": "1.0.0",
+  "description": "QQ空间说说发送插件，支持发布、查询、删除说说内容",
+  "author": "可可和满月月喵",
+  "dependencies": {
+    "plugins": ["napcat_adapter"],
+    "components": []
+  },
+  "include": [
+    {
+      "component_type": "action",
+      "component_name": "send_shuoshuo",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "action",
+      "component_name": "delete_shuoshuo",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "action",
+      "component_name": "like_shuoshuo",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "action",
+      "component_name": "comment_shuoshuo",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "action",
+      "component_name": "read_shuoshuo",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "action",
+      "component_name": "auto_monitor",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "command",
+      "component_name": "send_feed",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "command",
+      "component_name": "read_feed",
+      "dependencies": [],
+      "enabled": true
+    },
+    {
+      "component_type": "event_handler",
+      "component_name": "qzone_command_handler",
+      "dependencies": [],
+      "enabled": true
+    }
+  ],
+  "entry_point": "plugin.py",
+  "min_core_version": "1.0.0",
+  "python_dependencies": [
+    "httpx",
+    "orjson",
+    "aiofiles"
+  ],
+  "dependencies_required": true
+}
