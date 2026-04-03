@@ -6,8 +6,30 @@
 
 ## 功能特性
 
-### 待办（TODO）
-- [ ] 命令执行结果注入聊天流上下文：当前 `/send_feed`、`/read_feed` 的回执会发送给用户，但尚未稳定写回后续对话上下文，可能导致后续 Chatter 轮次重复追问或误判状态。
+### 🛠️ 插件演进与技术债 (Technical Backlog)
+
+#### 1. 存储架构升级 (Storage & DB Migration)
+- [ ] **由 JSON 转向 DB 索引**：
+    - **现状**：`read_tids` 和 `commented_tids` 存放在 `monitor_state.json` 中，随着数据增加性能线性下降。
+    - **建议**：定义 `QzoneTidModel(Base)`，接入 `kernel.db` 使用 `CRUDBase` 进行持久化。利用 SQLite 的索引能力实现毫秒级去重，并支持按时间自动清理超期数据。
+- [ ] **标准化存储路径**：移除硬编码的 `data/qzone_shuoshuo` 路径，改用框架 `storage_api` 获取标准数据目录，增强容器化环境兼容性。
+
+#### 2. 调度与生命周期标准化 (Standardized Task Scheduling)
+- [ ] **接入 `kernel.scheduler`**：
+    - **现状**：监控逻辑通过内部私有循环或 Action 触发。
+    - **建议**：将 `check_new_shuoshuo` 注册为框架层级的 `Job`。这样可以利用框架自带的 **任务可视化管理** 和 **失败回退机制**，且不再阻塞插件的卸载流程。
+- [ ] **全面接入 `TaskManager`**：确保 VLM 图片识别等耗时异步任务都通过 `get_task_manager().create_task` 运行，规避“僵尸协程”风险。
+
+#### 3. 健壮性与类型契约 (Robustness & Type Contract)
+- [ ] **Pydantic 数据模型化**：
+    - **问题**：大量使用 `dict[str, Any]` 取值（如 `data.get("code")`），缺乏 IDE 自动补全且易因上游协议变动导致隐蔽崩溃。
+    - **建议**：为 `get_shuoshuo_list` 和图片上传结果定义强类型的 `BaseModel`。
+- [ ] **精细化错误处理**：将目前的 `except Exception` 细化为 `NetworkError` (httpx), `AuthError` (Cookie过期), `ParseError` (JSON解析失败)。支持针对不同错误类型触发不同的重试策略。
+
+#### 4. 对话感知优化 (Dialogue Context Awareness)
+- [ ] **回执上下文注入**：
+    - **问题**：`/send_feed`、`/read_feed` 的执行成功与否目前仅作反馈显示，AI 并不一定能感知到“已发送”这一状态事实，可能导致重复操作。
+    - **方案**：在命令执行完成后，将关键结果（如 `tid` 或发送成功摘要）稳定注入当前对话流的 `LLMPayload` 历史中。
 
 ### 发送说说
 - 支持发送纯文本说说
