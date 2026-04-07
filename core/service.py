@@ -2653,12 +2653,57 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
                 self._last_monitor_skip_reason = normalized
             else:
                 self._last_monitor_result = "ok"
+
+            monitor_cfg = getattr(self.config, "monitor", None) if getattr(self, "config", None) else None
+            heartbeat_enabled = bool(getattr(monitor_cfg, "log_heartbeat", True)) if monitor_cfg else True
+            if heartbeat_enabled:
+                if self._last_monitor_result == "skipped":
+                    human_reason = self._describe_monitor_skip_reason(self._last_monitor_skip_reason)
+                    logger.info(
+                        f"[自动监控][HB] {source} | {'force' if force else 'normal'} | skipped:{human_reason} ({self._last_monitor_skip_reason})"
+                    )
+                else:
+                    logger.info(f"[自动监控][HB] {source} | {'force' if force else 'normal'} | ok")
             return normalized
         except Exception as e:
             self._last_monitor_result = "error"
             self._last_monitor_error = str(e)
             logger.error(f"[自动监控] 本轮执行异常(source={source}): {e}")
+
+            monitor_cfg = getattr(self.config, "monitor", None) if getattr(self, "config", None) else None
+            heartbeat_enabled = bool(getattr(monitor_cfg, "log_heartbeat", True)) if monitor_cfg else True
+            if heartbeat_enabled:
+                logger.info(f"[自动监控][HB] {source} | {'force' if force else 'normal'} | error")
             return "error"
+
+    def _describe_monitor_skip_reason(self, reason_code: str) -> str:
+        """将监控跳过原因码转换为可读中文描述。"""
+        code = str(reason_code or "").strip()
+        if not code:
+            return "未知原因"
+
+        if code == "skip_quiet_hours":
+            monitor_cfg = getattr(self.config, "monitor", None) if getattr(self, "config", None) else None
+            start_hour = int(getattr(monitor_cfg, "quiet_hours_start", 23) or 23) if monitor_cfg else 23
+            end_hour = int(getattr(monitor_cfg, "quiet_hours_end", 7) or 7) if monitor_cfg else 7
+            start_hour = max(0, min(start_hour, 23))
+            end_hour = max(0, min(end_hour, 23))
+            return f"处于静默时间窗口({start_hour:02d}:00-{end_hour:02d}:00)"
+
+        if code == "skip_cooldown":
+            now_ts = time.time()
+            cooldown_until = float(getattr(self, "_monitor_cooldown_until", 0.0) or 0.0)
+            remain = max(0, int(cooldown_until - now_ts))
+            return f"手动触发冷却中(剩余约{remain}s)"
+
+        mapping = {
+            "skip_disabled": "监控总开关关闭",
+            "skip_not_running": "监控未运行",
+            "skip_no_qq": "未获取到登录QQ",
+            "skip_list_failed": "读取说说列表失败",
+            "skip_empty_list": "说说列表为空",
+        }
+        return mapping.get(code, "已跳过本轮")
 
     def _is_monitor_enabled(self) -> bool:
         """监控总开关是否开启。"""

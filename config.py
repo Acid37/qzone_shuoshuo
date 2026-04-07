@@ -42,8 +42,13 @@ class QzoneConfig(BaseConfig):
         """监控默认配置。"""
 
         enabled: bool = Field(default=True, description="监控总开关，关闭后不允许启动自动监控")
+        auto_start: bool = Field(default=True, description="插件加载后是否自动启动监控")
         # 范围: 60 ~ 86400 秒
         default_interval: int = Field(default=1800, description="默认监控间隔（秒），范围 60-86400")
+        log_heartbeat: bool = Field(
+            default=True,
+            description="是否输出每轮监控心跳日志（info级），用于确认监控仍在运行"
+        )
         # 概率配置（0=不执行，1=必定执行）
         like_probability: float = Field(
             default=0.8,
