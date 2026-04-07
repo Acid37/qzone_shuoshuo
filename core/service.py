@@ -63,7 +63,7 @@ class QzoneService(BaseService):
 
     service_name = "qzone"
     service_description = "QQ空间说说核心服务"
-    version = "1.0.0"
+    version = "1.1.0"
 
     EMOTION_PUBLISH_URL = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_publish_v6"
     UPLOAD_URL = "https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image"
@@ -122,6 +122,20 @@ class QzoneService(BaseService):
         self._monitor_config: dict[str, Any] = {}
         # 手动触发后的监控冷却截止时间戳（用于“主动执行后重新计时”）
         self._monitor_cooldown_until: float = 0.0
+        # 监控运行态（用于 status 可观测性）
+        self._last_monitor_run_at: float = 0.0
+        self._last_monitor_source: str = ""
+        self._last_monitor_force: bool = False
+        self._last_monitor_result: str = "never"
+        self._last_monitor_error: str = ""
+        self._last_monitor_skip_reason: str = ""
+        # 启动连接就绪重试（首轮拿不到 QQ 时触发）
+        self._startup_retry_active: bool = False
+        self._startup_retry_attempt: int = 0
+        self._startup_retry_max_attempts: int = 0
+        self._startup_retry_interval: int = 0
+        self._startup_retry_job_name: str = ""
+        self._startup_retry_last_reason: str = ""
         # Cookie 误判防护统计（评论空响应二次确认）
         self._cookie_confirm_total: int = 0
         self._cookie_confirm_recovered: int = 0
@@ -1416,32 +1430,35 @@ class QzoneService(BaseService):
         logger.warning("[Cookie更新] 未能获取 Cookie")
         return None
 
-    async def check_new_shuoshuo(self, *, force: bool = False, source: str = "scheduled") -> None:
+    async def check_new_shuoshuo(self, *, force: bool = False, source: str = "scheduled") -> str:
         """检查并广播新说说（供内部/外部调用）。
 
         Args:
             force: 是否强制执行。为 True 时跳过静默窗口/手动冷却检查。
             source: 触发来源，仅用于日志标记。
+
+        Returns:
+            本轮执行结果码（如 skip_no_qq / processed_new_items / no_change）。
         """
         if not self._is_monitor_enabled():
             logger.debug("[说说监控] 监控总开关关闭，跳过")
-            return
+            return "skip_disabled"
 
         # 不再检查静态配置，改为检查动态配置
         if not self._monitor_running:
             logger.debug("[说说监控] 监控未启动，跳过")
-            return
+            return "skip_not_running"
 
         now_ts = time.time()
         cooldown_until = float(getattr(self, "_monitor_cooldown_until", 0.0) or 0.0)
         if not force and cooldown_until > now_ts:
             remaining = int(cooldown_until - now_ts)
             logger.debug(f"[说说监控] 主动执行后冷却中，剩余约 {remaining}s，跳过本轮")
-            return
+            return "skip_cooldown"
 
         if not force and self._is_in_quiet_hours():
             logger.debug("[说说监控] 当前处于静默时间窗口，跳过本轮")
-            return
+            return "skip_quiet_hours"
 
         if force:
             logger.info(f"[说说监控] 强制执行本轮（source={source}），已跳过静默/冷却检查")
@@ -1449,7 +1466,7 @@ class QzoneService(BaseService):
         current_qq = await self.get_current_uin()
         if not current_qq:
             logger.warning("[说说监控] 无法获取 QQ 号，跳过检查")
-            return
+            return "skip_no_qq"
 
         # 检查是否启用回复自己说说的评论
         monitor_cfg = getattr(self.config, "monitor", None)
@@ -1464,12 +1481,12 @@ class QzoneService(BaseService):
         result = await self.get_shuoshuo_list(current_qq, count=5)
         if not result.is_success or not result.data:
             logger.warning("[说说监控] 获取说说列表失败")
-            return
+            return "skip_list_failed"
 
         latest_list = result.data
         if not latest_list:
             logger.debug("[说说监控] 说说列表为空")
-            return
+            return "skip_empty_list"
 
         latest_item = latest_list[0]
         latest_tid = latest_item.get("tid")
@@ -1478,7 +1495,7 @@ class QzoneService(BaseService):
             self._last_tid = latest_tid
             self._save_state()
             logger.info(f"[说说监控] 初始化完成，当前最新说说 TID: {latest_tid}")
-            return
+            return "baseline_initialized"
 
         if latest_tid != self._last_tid:
             new_items = []
@@ -1523,10 +1540,13 @@ class QzoneService(BaseService):
                 )
                 self._last_tid = latest_tid
                 self._save_state()
+                return "processed_new_items"
             else:
                 logger.debug("[说说监控] 未发现增量说说")
+                return "no_change"
         else:
             logger.debug("[说说监控] 最新说说未变化，无需处理")
+            return "no_change"
 
     def _is_in_quiet_hours(self, now: datetime.datetime | None = None) -> bool:
         """判断当前是否处于静默时间窗口。"""
@@ -2326,6 +2346,12 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
         cooldown_until = float(getattr(self, "_monitor_cooldown_until", 0.0) or 0.0)
         cooldown_remaining = max(0, int(cooldown_until - now_ts))
         baseline_tid = str(getattr(self, "_last_tid", "") or "").strip()
+        last_run_at = float(getattr(self, "_last_monitor_run_at", 0.0) or 0.0)
+
+        startup_retry_active = bool(getattr(self, "_startup_retry_active", False))
+        startup_retry_attempt = int(getattr(self, "_startup_retry_attempt", 0) or 0)
+        startup_retry_max = int(getattr(self, "_startup_retry_max_attempts", 0) or 0)
+        startup_retry_interval = int(getattr(self, "_startup_retry_interval", 0) or 0)
 
         return {
             "is_running": self._monitor_running,
@@ -2344,7 +2370,111 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
             "cooldown_remaining_seconds": cooldown_remaining,
             "baseline_initialized": bool(baseline_tid),
             "last_tid": baseline_tid,
+            "last_run_at": int(last_run_at) if last_run_at > 0 else 0,
+            "last_run_source": str(getattr(self, "_last_monitor_source", "") or ""),
+            "last_run_force": bool(getattr(self, "_last_monitor_force", False)),
+            "last_run_result": str(getattr(self, "_last_monitor_result", "never") or "never"),
+            "last_run_skip_reason": str(getattr(self, "_last_monitor_skip_reason", "") or ""),
+            "last_run_error": str(getattr(self, "_last_monitor_error", "") or ""),
+            "startup_retry_active": startup_retry_active,
+            "startup_retry_attempt": startup_retry_attempt,
+            "startup_retry_max_attempts": startup_retry_max,
+            "startup_retry_remaining_attempts": max(startup_retry_max - startup_retry_attempt, 0),
+            "startup_retry_interval": startup_retry_interval,
+            "startup_retry_last_reason": str(getattr(self, "_startup_retry_last_reason", "") or ""),
         }
+
+    async def _stop_startup_retry(self) -> None:
+        """停止启动连接就绪重试任务。"""
+        if not bool(getattr(self, "_startup_retry_active", False)) and not str(getattr(self, "_startup_retry_job_name", "") or ""):
+            return
+
+        try:
+            from src.kernel.scheduler import get_unified_scheduler
+
+            scheduler = get_unified_scheduler()
+            job_name = str(getattr(self, "_startup_retry_job_name", "") or "")
+            if job_name:
+                if hasattr(scheduler, "remove_job"):
+                    await scheduler.remove_job(job_name)
+                elif hasattr(scheduler, "remove_schedule_by_name"):
+                    await scheduler.remove_schedule_by_name(job_name)
+        except Exception:
+            pass
+        finally:
+            self._startup_retry_active = False
+            self._startup_retry_job_name = ""
+
+    async def _schedule_startup_retry(self, *, max_attempts: int, interval_seconds: int, reason: str) -> None:
+        """为启动首轮安排连接就绪重试。"""
+        from src.kernel.scheduler import get_unified_scheduler, TriggerType
+
+        await self._stop_startup_retry()
+
+        if max_attempts <= 0:
+            return
+
+        scheduler = get_unified_scheduler()
+        retry_interval = max(5, min(interval_seconds, 300))
+        retry_job_name = f"qzone_startup_retry_{id(self)}"
+
+        if hasattr(scheduler, "add_job"):
+            interval_trigger = getattr(TriggerType, "INTERVAL", None) or TriggerType.TIME
+            await scheduler.add_job(
+                func=self._run_startup_retry_tick,
+                trigger=interval_trigger,
+                seconds=retry_interval,
+                id=retry_job_name,
+                replace_existing=True,
+            )
+        elif hasattr(scheduler, "create_schedule"):
+            await scheduler.create_schedule(
+                callback=self._run_startup_retry_tick,
+                trigger_type=TriggerType.TIME,
+                trigger_config={"interval_seconds": retry_interval},
+                is_recurring=True,
+                task_name=retry_job_name,
+                force_overwrite=True,
+            )
+        else:
+            raise RuntimeError("当前调度器不支持 add_job/create_schedule 接口")
+
+        self._startup_retry_active = True
+        self._startup_retry_attempt = 0
+        self._startup_retry_max_attempts = int(max_attempts)
+        self._startup_retry_interval = int(retry_interval)
+        self._startup_retry_job_name = retry_job_name
+        self._startup_retry_last_reason = str(reason or "")
+
+        logger.info(
+            f"[自动监控] 已启用连接就绪重试：每 {retry_interval}s 一次，最多 {max_attempts} 次，原因={reason}"
+        )
+
+    async def _run_startup_retry_tick(self) -> None:
+        """启动首轮连接就绪重试轮询。"""
+        if not self._monitor_running:
+            await self._stop_startup_retry()
+            return
+
+        if not self._startup_retry_active:
+            return
+
+        self._startup_retry_attempt += 1
+        current_attempt = self._startup_retry_attempt
+        max_attempts = max(int(self._startup_retry_max_attempts or 0), 0)
+
+        result_code = await self._run_auto_monitor(force=True, source="startup_retry")
+
+        # 成功拿到连接并执行过真实检查后，关闭重试
+        if result_code != "skip_no_qq":
+            logger.info(f"[自动监控] 启动连接重试成功（第 {current_attempt}/{max_attempts} 次）")
+            await self._stop_startup_retry()
+            return
+
+        if current_attempt >= max_attempts:
+            self._startup_retry_last_reason = "max_attempts_reached"
+            logger.warning("[自动监控] 启动连接重试已达上限，停止重试")
+            await self._stop_startup_retry()
 
     async def start_monitor(self, config: dict[str, Any]) -> dict[str, Any]:
         """启动自动监控
@@ -2362,6 +2492,21 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
         """
         try:
             from src.kernel.scheduler import get_unified_scheduler, TriggerType
+
+            # 兼容测试中使用 object.__new__ 构造实例导致的属性缺失
+            self._startup_retry_active = bool(getattr(self, "_startup_retry_active", False))
+            self._startup_retry_attempt = int(getattr(self, "_startup_retry_attempt", 0) or 0)
+            self._startup_retry_max_attempts = int(getattr(self, "_startup_retry_max_attempts", 0) or 0)
+            self._startup_retry_interval = int(getattr(self, "_startup_retry_interval", 0) or 0)
+            self._startup_retry_job_name = str(getattr(self, "_startup_retry_job_name", "") or "")
+            self._startup_retry_last_reason = str(getattr(self, "_startup_retry_last_reason", "") or "")
+
+            self._last_monitor_run_at = float(getattr(self, "_last_monitor_run_at", 0.0) or 0.0)
+            self._last_monitor_source = str(getattr(self, "_last_monitor_source", "") or "")
+            self._last_monitor_force = bool(getattr(self, "_last_monitor_force", False))
+            self._last_monitor_result = str(getattr(self, "_last_monitor_result", "never") or "never")
+            self._last_monitor_error = str(getattr(self, "_last_monitor_error", "") or "")
+            self._last_monitor_skip_reason = str(getattr(self, "_last_monitor_skip_reason", "") or "")
 
             if not self._is_monitor_enabled():
                 logger.warning("[自动监控] 启动被拒绝：监控总开关已关闭")
@@ -2382,6 +2527,14 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
 
             # 启动监控时清空冷却，避免历史手动触发影响新会话
             self._monitor_cooldown_until = 0.0
+
+            # 启动时重置运行态摘要
+            self._last_monitor_run_at = 0.0
+            self._last_monitor_source = ""
+            self._last_monitor_force = False
+            self._last_monitor_result = "never"
+            self._last_monitor_error = ""
+            self._last_monitor_skip_reason = ""
 
             scheduler = get_unified_scheduler()
             job_name = f"qzone_auto_monitor_{id(self)}"
@@ -2426,7 +2579,17 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
             # - 首轮强制执行，跳过静默/冷却检查
             # - 已读/基线机制仍保留，避免历史刷屏
             try:
-                await self._run_auto_monitor(force=True, source="startup_immediate")
+                startup_result = await self._run_auto_monitor(force=True, source="startup_immediate")
+                if startup_result == "skip_no_qq":
+                    retry_max_attempts = int(config.get("startup_retry_max_attempts", 6) or 6)
+                    retry_interval = int(config.get("startup_retry_interval", 10) or 10)
+                    retry_max_attempts = max(1, min(retry_max_attempts, 60))
+                    retry_interval = max(5, min(retry_interval, 300))
+                    await self._schedule_startup_retry(
+                        max_attempts=retry_max_attempts,
+                        interval_seconds=retry_interval,
+                        reason="startup_no_qq",
+                    )
             except Exception as immediate_err:
                 logger.warning(f"[自动监控] 启动即执行首轮失败（已忽略，不影响后续定时监控）: {immediate_err}")
 
@@ -2434,6 +2597,10 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
                 "success": True,
                 "message": f"监控已启动，间隔 {interval} 秒",
                 "job_id": job_id,
+                "startup_retry_active": bool(getattr(self, "_startup_retry_active", False)),
+                "startup_retry_attempt": int(getattr(self, "_startup_retry_attempt", 0) or 0),
+                "startup_retry_max_attempts": int(getattr(self, "_startup_retry_max_attempts", 0) or 0),
+                "startup_retry_interval": int(getattr(self, "_startup_retry_interval", 0) or 0),
             }
         except Exception as e:
             logger.error(f"[自动监控] 启动失败: {e}")
@@ -2443,6 +2610,12 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
         """停止自动监控"""
         try:
             from src.kernel.scheduler import get_unified_scheduler
+
+            # 兼容测试中使用 object.__new__ 构造实例导致的属性缺失
+            self._monitor_running = bool(getattr(self, "_monitor_running", False))
+            self._monitor_cooldown_until = float(getattr(self, "_monitor_cooldown_until", 0.0) or 0.0)
+            self._startup_retry_active = bool(getattr(self, "_startup_retry_active", False))
+            self._startup_retry_job_name = str(getattr(self, "_startup_retry_job_name", "") or "")
 
             scheduler = get_unified_scheduler()
             try:
@@ -2456,16 +2629,36 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
 
             self._monitor_running = False
             self._monitor_cooldown_until = 0.0
+            await self._stop_startup_retry()
             logger.info("[自动监控] 已停止")
             return {"success": True, "message": "监控已停止"}
         except Exception as e:
             logger.error(f"[自动监控] 停止失败: {e}")
             return {"success": False, "message": str(e)}
 
-    async def _run_auto_monitor(self, *, force: bool = False, source: str = "scheduled") -> None:
+    async def _run_auto_monitor(self, *, force: bool = False, source: str = "scheduled") -> str:
         """执行自动监控任务。"""
         logger.debug(f"[自动监控] 开始检查新说说(force={force}, source={source})")
-        await self.check_new_shuoshuo(force=force, source=source)
+        self._last_monitor_run_at = time.time()
+        self._last_monitor_source = source
+        self._last_monitor_force = force
+        self._last_monitor_error = ""
+        self._last_monitor_skip_reason = ""
+
+        try:
+            result_code = await self.check_new_shuoshuo(force=force, source=source)
+            normalized = str(result_code or "unknown")
+            if normalized.startswith("skip_"):
+                self._last_monitor_result = "skipped"
+                self._last_monitor_skip_reason = normalized
+            else:
+                self._last_monitor_result = "ok"
+            return normalized
+        except Exception as e:
+            self._last_monitor_result = "error"
+            self._last_monitor_error = str(e)
+            logger.error(f"[自动监控] 本轮执行异常(source={source}): {e}")
+            return "error"
 
     def _is_monitor_enabled(self) -> bool:
         """监控总开关是否开启。"""

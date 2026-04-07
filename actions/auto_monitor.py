@@ -21,7 +21,7 @@ class AutoMonitorAction(BaseAction):
     action_name = "auto_monitor"
     action_description = (
         "自动监控 QQ 空间说说。\n"
-        "启动后会立即尝试执行一轮监控，随后按间隔自动检测新说说并通知；"
+        "启动后会立即尝试执行一轮监控，若适配器尚未就绪会在后台短周期重试；随后按间隔自动检测新说说并通知；"
         "可配置自动评论和点赞（支持概率控制）。\n"
         "\n"
         "【重要约束】\n"
@@ -123,6 +123,17 @@ class AutoMonitorAction(BaseAction):
             in_quiet_hours = bool(status.get("in_quiet_hours", False))
             cooldown_seconds = int(status.get("cooldown_remaining_seconds", 0) or 0)
             baseline_initialized = bool(status.get("baseline_initialized", False))
+            last_run_result = str(status.get("last_run_result", "never") or "never")
+            last_run_source = str(status.get("last_run_source", "") or "")
+            last_run_skip_reason = str(status.get("last_run_skip_reason", "") or "")
+            last_run_error = str(status.get("last_run_error", "") or "")
+            last_run_force = bool(status.get("last_run_force", False))
+            last_run_at_ts = int(status.get("last_run_at", 0) or 0)
+
+            startup_retry_active = bool(status.get("startup_retry_active", False))
+            startup_retry_attempt = int(status.get("startup_retry_attempt", 0) or 0)
+            startup_retry_max = int(status.get("startup_retry_max_attempts", 0) or 0)
+            startup_retry_interval = int(status.get("startup_retry_interval", 0) or 0)
             if status.get("is_running"):
                 lines = [
                     "📡 自动监控状态：运行中",
@@ -135,6 +146,27 @@ class AutoMonitorAction(BaseAction):
                 if cooldown_seconds > 0:
                     lines.append(f"   手动触发冷却：剩余约 {cooldown_seconds} 秒")
                 lines.append(f"   首次基线：{'已建立' if baseline_initialized else '未建立（首次轮询仅记录最新动态）'}")
+                if last_run_at_ts > 0:
+                    import datetime
+
+                    last_run_time = datetime.datetime.fromtimestamp(last_run_at_ts).strftime("%m-%d %H:%M:%S")
+                    run_desc = f"{last_run_result}"
+                    if last_run_source:
+                        run_desc += f", source={last_run_source}"
+                    if last_run_force:
+                        run_desc += ", force=true"
+                    lines.append(f"   最近执行：{last_run_time} ({run_desc})")
+                    if last_run_skip_reason:
+                        lines.append(f"   最近跳过原因：{last_run_skip_reason}")
+                    if last_run_error:
+                        lines.append(f"   最近错误：{last_run_error}")
+                else:
+                    lines.append("   最近执行：尚无记录")
+
+                if startup_retry_active:
+                    lines.append(
+                        f"   启动重试：进行中 ({startup_retry_attempt}/{startup_retry_max}, 每{startup_retry_interval}s)"
+                    )
                 if not monitor_enabled:
                     lines.append("   监控总开关：关闭（配置 monitor.enabled=false）")
                 if status.get("target_group"):
@@ -201,6 +233,10 @@ class AutoMonitorAction(BaseAction):
                 status = await service.get_monitor_status()
                 lines = ["✅ 自动监控已启动"]
                 lines.append(f"   监控间隔：{int(status.get('interval', 300) or 300)} 秒")
+                if bool(status.get("startup_retry_active", False)):
+                    lines.append(
+                        "   连接就绪重试：已启用（首轮未拿到QQ，后台将自动重试直到成功或达上限）"
+                    )
                 if config.get("target_group"):
                     lines.append(f"   推送群：{config['target_group']}")
                 if config.get("target_user"):

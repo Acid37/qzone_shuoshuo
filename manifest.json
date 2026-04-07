@@ -1,6 +1,6 @@
 {
   "name": "qzone_shuoshuo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "QQ空间说说发送插件，支持发布、查询、删除说说内容",
   "author": "可可和满月月喵",
   "dependencies": {

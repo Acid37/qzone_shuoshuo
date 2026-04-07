@@ -29,8 +29,8 @@ class QzoneShuoshuoPlugin(BasePlugin):
     """QQ空间说说插件主类"""
 
     plugin_name = "qzone_shuoshuo"
-    plugin_version = "1.0.0"
-    plugin_author = "MoFox Team"
+    plugin_version = "1.1.0"
+    plugin_author = "可可和满月月喵"
     plugin_description = "QQ空间说说发送插件，支持发布、查询说说内容"
     configs = [QzoneConfig]
 
