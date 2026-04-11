@@ -108,9 +108,14 @@ class SendFeedCommand(BaseCommand):
 
         from src.app.plugin_system.api.send_api import send_text
         preview_topic = "随机" if used_random_seed else raw_topic
+        preview_text = (
+            "收到！正在为你生成一条随机主题的说说，请稍候..."
+            if used_random_seed
+            else f"收到！正在为你生成关于“{preview_topic}”的说说，请稍候..."
+        )
         try:
             await send_text(
-                content=f"收到！正在为你生成关于“{preview_topic}”的说说，请稍候...",
+                content=preview_text,
                 stream_id=self.stream_id,
             )
         except Exception as e:

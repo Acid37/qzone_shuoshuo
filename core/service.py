@@ -63,7 +63,7 @@ class QzoneService(BaseService):
 
     service_name = "qzone"
     service_description = "QQ空间说说核心服务"
-    version = "1.2.5"
+    version = "1.2.7"
 
     EMOTION_PUBLISH_URL = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_publish_v6"
     UPLOAD_URL = "https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image"
@@ -2441,14 +2441,26 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
             "- 仅输出最终说说正文\n"
             "- 不要解释、不要前缀\n"
             "- 保留原意，不编造事实\n"
-            "- 避免与最近发布内容语义重复"
+            "- 避免与最近发布内容语义重复\n"
+            "- 长度建议 28~80 字\n"
+            "- 至少包含两个信息点（如：场景+感受 / 事件+观点）\n"
+            "- 避免过短口号式表达"
         )
 
         try:
             text = await self._generate_ai_comment_from_full_prompt(user_prompt, system_prompt)
             if text:
-                self._log("debug", "[发布改写]", "发布前内容改写成功")
-                return text
+                rewritten_text = str(text).strip()
+                if rewritten_text:
+                    if len(rewritten_text) < 24:
+                        self._log(
+                            "debug",
+                            "[发布改写]",
+                            f"改写结果偏短（len={len(rewritten_text)}），按单次请求策略直接采用",
+                        )
+                    else:
+                        self._log("debug", "[发布改写]", "发布前内容改写成功")
+                    return rewritten_text
         except Exception as e:
             self._log("warning", "[发布改写]", f"发布前改写失败，回退原文: {e}")
 
