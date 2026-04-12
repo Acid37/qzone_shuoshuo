@@ -226,6 +226,9 @@ class QzoneService(BaseService):
                             return str(qq_id)
                 except Exception as probe_err:
                     logger.debug(f"[NapCat探测] 主动探测失败，回退到缓存读取: {probe_err}")
+            else:
+                # 适配器版本较旧，不支持实时探测
+                self._log("debug", "[NapCat探测]", "当前适配器不支持实时探测 (send_napcat_api)，已回退到缓存模式")
 
             # 2. 回退机制：读取适配器缓存信息（兼容旧版本适配器）
             bot_info = await get_adapter_manager().get_bot_info_by_platform("qq")
@@ -3318,10 +3321,32 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
             for attempt in range(3):
                 current_qq = await self.get_current_uin()
                 if current_qq:
-                    connection_ready = True
-                    if attempt > 0:
-                        logger.info(f"[自动监控] 适配器连接就绪 (尝试了 {attempt + 1} 次)")
-                    break
+                    # 尝试验证连接
+                    try:
+                        from src.core.managers.adapter_manager import get_adapter_manager
+                        adapter = get_adapter_manager().get_adapter("qq")
+                        
+                        if adapter and hasattr(adapter, "send_napcat_api"):
+                            # 支持探测：必须探测通过才算就绪
+                            res = await adapter.send_napcat_api("get_login_info", {})
+                            if res and res.get("status") == "ok":
+                                connection_ready = True
+                                logger.info(f"[自动监控] 适配器连接验证通过 (实时探测)")
+                                break
+                            else:
+                                logger.debug(f"[自动监控] 探测未就绪 (尝试 {attempt + 1})")
+                        else:
+                            # 不支持探测 (旧版适配器)：拿到 QQ 后强制缓冲 3 秒
+                            # 这 3 秒通常足够 WebSocket 完成握手
+                            connection_ready = True
+                            logger.warning(f"[自动监控] 适配器不支持实时探测，假设已连接 (建议升级 napcat_adapter)")
+                            if attempt == 0: # 仅在首次拿到 QQ 时强制缓冲
+                                logger.info(f"[自动监控] 强制缓冲 3 秒以确保 WebSocket 连接...")
+                                await asyncio.sleep(3)
+                            break
+                    except Exception:
+                        pass # 探测异常，继续等待
+                
                 if attempt < 2:
                     logger.info(f"[自动监控] 等待适配器连接... (尝试 {attempt + 1}/3)")
                     await asyncio.sleep(5)
