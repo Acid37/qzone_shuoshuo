@@ -204,16 +204,37 @@ class QzoneService(BaseService):
             logger.error(f"{tag} {msg}")
 
     async def _get_qq_from_napcat(self) -> str | None:
-        """从 NapCat 适配器自动获取 Bot 的 QQ 号"""
+        """从 NapCat 适配器自动获取 Bot 的 QQ 号。
+        
+        采用“主动探测”模式：优先通过真实 API 调用 (get_login_info) 验证连接状态，
+        确保 WebSocket 已连接且响应正常，再回退到读取缓存。
+        """
         try:
             from src.core.managers.adapter_manager import get_adapter_manager
-            # NapCat 适配器的 platform 是 "qq"
+
+            # 获取 QQ 适配器实例
+            adapter = get_adapter_manager().get_adapter("qq")
+            
+            # 1. 主动探测：尝试调用底层 API 验证连接
+            if adapter and hasattr(adapter, "send_napcat_api"):
+                try:
+                    res = await adapter.send_napcat_api("get_login_info", {})
+                    if res and res.get("status") == "ok":
+                        qq_id = res.get("data", {}).get("user_id")
+                        if qq_id:
+                            logger.info(f"[NapCat探测] 连接验证成功，获取到 QQ: {qq_id}")
+                            return str(qq_id)
+                except Exception as probe_err:
+                    logger.debug(f"[NapCat探测] 主动探测失败，回退到缓存读取: {probe_err}")
+
+            # 2. 回退机制：读取适配器缓存信息（兼容旧版本适配器）
             bot_info = await get_adapter_manager().get_bot_info_by_platform("qq")
             if bot_info:
                 qq_id = bot_info.get("bot_id")
                 if qq_id:
-                    logger.info(f"自动从 NapCat 获取到 QQ 号: {qq_id}")
+                    logger.info(f"[NapCat缓存] 读取到缓存 QQ: {qq_id}")
                     return str(qq_id)
+            
             logger.warning("未能从 NapCat 获取 QQ 号信息")
         except Exception as e:
             logger.error(f"从 NapCat 获取 QQ 号失败: {e}")
@@ -1673,7 +1694,7 @@ class QzoneService(BaseService):
                 # 追踪评论过的说说（避免重复评论）
                 self._mark_commented(shuoshuo_id)
                 self._save_state()
-                logger.info(f"[评论说说] 成功, tid={shuoshuo_id}, cid={cid}")
+                logger.info(f"[评论说说] 成功, tid={shuoshuo_id}, 内容: {content[:50]}...")
                 return Result.ok({
                     "tid": shuoshuo_id,
                     "cid": cid,
@@ -2387,7 +2408,19 @@ QQ空间是中文社交平台，用户通过“说说”记录日常，好友会
         if not url:
             return None
 
+        # 1. 修复 QQ 空间常见的协议相对路径 (//...)
+        if url.startswith("//"):
+            url = "https:" + url
+        
+        # 2. 严格检查协议头 (兼容大小写)
+        # 如果不是 http/https 开头，直接跳过，防止 httpx 报错
+        if not url.lower().startswith(("http://", "https://")):
+            self._log("warning", "[VLM识图]", f"忽略无效协议链接: {url[:50]}...")
+            return None
+
         try:
+            # 打印实际请求的 URL，方便排查隐形字符问题
+            self._log("debug", "[VLM识图]", f"正在请求图片: {url[:60]}...")
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(url)
             if resp.status_code >= 400 or not resp.content:
@@ -3004,48 +3037,6 @@ QQ空间是中文社交平台，用户通过“说说”记录生活，好友可
                 if comment.startswith("'") and comment.endswith("'"):
                     comment = comment[1:-1]
                 return comment
-        except Exception as e:
-            self._log("warning", "[AI评论]", f"LLM调用失败: {e}")
-        return None
-
-    async def _generate_ai_comment(
-        self,
-        system_prompt: str,
-        user_template: str,
-        content: str,
-        nickname: str,
-    ) -> str | None:
-        """使用 AI 生成评论
-
-        Args:
-            system_prompt: 系统提示词
-            user_template: 用户提示词模板
-            content: 说说内容
-            nickname: 作者昵称
-
-        Returns:
-            生成的评论文本，失败返回 None
-        """
-        try:
-            from src.app.plugin_system.api.llm_api import get_model_set_by_task
-            from src.kernel.llm import LLMRequest, LLMPayload, ROLE, Text
-
-            # 构建用户提示词
-            user_prompt = user_template.replace("{content}", content[:200])
-            user_prompt = user_prompt.replace("{nickname}", nickname)
-
-            self._log("debug", "[AI评论]", f"请求AI生成评论, 内容: {content[:50]}...")
-            model_set = get_model_set_by_task("actor")
-
-            # 调用 LLM
-            llm_request = LLMRequest(model_set=model_set)
-            llm_request.add_payload(LLMPayload(ROLE.SYSTEM, Text(system_prompt)))
-            llm_request.add_payload(LLMPayload(ROLE.USER, Text(user_prompt)))
-
-            response = await llm_request.send(stream=False)
-            text = str(getattr(response, "message", "") or "").strip()
-            if text:
-                return text
         except Exception as e:
             self._log("warning", "[AI评论]", f"LLM调用失败: {e}")
         return None

@@ -61,6 +61,12 @@
       "component_name": "qzone_command_handler",
       "dependencies": [],
       "enabled": true
+    },
+    {
+      "component_type": "service",
+      "component_name": "qzone",
+      "dependencies": [],
+      "enabled": true
     }
   ],
   "entry_point": "plugin.py",

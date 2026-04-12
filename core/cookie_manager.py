@@ -95,9 +95,19 @@ class CookieManager:
                 if cookie_str:
                     return self._parse_cookie_str(cookie_str)
             else:
-                logger.warning(f"适配器返回错误: {result}")
+                # 区分“等待连接”与“真实错误”
+                msg = str(result)
+                if "连接未建立" in msg or "WebSocket" in msg:
+                    logger.warning(f"适配器未连接，获取 Cookie 失败 (等待连接中): {result}")
+                else:
+                    logger.warning(f"适配器返回错误: {result}")
         except Exception as e:
-            logger.error(f"从适配器获取 Cookie 失败: {e}")
+            err_msg = str(e)
+            # 区分“等待连接”与“真实错误”
+            if "连接未建立" in err_msg or "WebSocket" in err_msg:
+                logger.warning(f"适配器未连接，获取 Cookie 失败 (等待连接中): {e}")
+            else:
+                logger.error(f"从适配器获取 Cookie 失败: {e}")
 
         return None
 
