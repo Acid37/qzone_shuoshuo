@@ -4,6 +4,5 @@
 """
 
 from .command_handler import QzoneCommandHandler
-from .monitor_handler import QzoneMonitorHandler
 
-__all__ = ["QzoneMonitorHandler", "QzoneCommandHandler"]
+__all__ = ["QzoneCommandHandler"]

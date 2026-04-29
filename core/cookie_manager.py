@@ -120,11 +120,11 @@ class CookieManager:
         Returns:
             Cookie 字典
         """
-        cookies = {}
+        cookies: dict[str, str] = {}
         for item in cookie_str.split(";"):
             if "=" in item:
                 k, v = item.strip().split("=", 1)
-                cookies[k] = v
+                cookies[k.strip()] = v.strip()
         return cookies
 
     async def get_cookies(self, qq: str, adapter_sign: str = "") -> dict[str, str] | None:

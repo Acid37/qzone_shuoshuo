@@ -73,7 +73,7 @@ class QzoneCommandHandler(BaseEventHandler):
                 content=(
                     "命令未识别，请检查格式：\n"
                     "- /send_feed [内容]\n"
-                    "- /read_feed [数量] [--read-only] [--no-like] [--no-comment]"
+                    "- /read_feed [数量]"
                 ),
                 stream_id=message.stream_id,
                 platform=message.platform,

@@ -13,11 +13,7 @@ from .config import QzoneConfig
 from .core.service import QzoneService
 from .actions import (
     SendShuoshuoAction,
-    DeleteShuoshuoAction,
-    LikeShuoshuoAction,
-    CommentShuoshuoAction,
     ReadShuoshuoAction,
-    AutoMonitorAction,
 )
 from .commands import SendFeedCommand, ReadFeedCommand
 from .event_handlers import QzoneCommandHandler
@@ -153,11 +149,7 @@ class QzoneShuoshuoPlugin(BasePlugin):
             QzoneService,
             # Actions - 提供给 AI 调用的操作
             SendShuoshuoAction,
-            DeleteShuoshuoAction,
-            LikeShuoshuoAction,
-            CommentShuoshuoAction,
             ReadShuoshuoAction,
-            AutoMonitorAction,
             # Commands - 命令行处理
             SendFeedCommand,
             ReadFeedCommand,

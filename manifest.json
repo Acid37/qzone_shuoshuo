@@ -16,31 +16,7 @@
     },
     {
       "component_type": "action",
-      "component_name": "delete_shuoshuo",
-      "dependencies": [],
-      "enabled": true
-    },
-    {
-      "component_type": "action",
-      "component_name": "like_shuoshuo",
-      "dependencies": [],
-      "enabled": true
-    },
-    {
-      "component_type": "action",
-      "component_name": "comment_shuoshuo",
-      "dependencies": [],
-      "enabled": true
-    },
-    {
-      "component_type": "action",
       "component_name": "read_shuoshuo",
-      "dependencies": [],
-      "enabled": true
-    },
-    {
-      "component_type": "action",
-      "component_name": "auto_monitor",
       "dependencies": [],
       "enabled": true
     },

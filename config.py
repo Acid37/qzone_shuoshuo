@@ -33,6 +33,10 @@ class QzoneConfig(BaseConfig):
     class QzoneSection(SectionBase):
         """QQ空间配置"""
 
+        adapter_signature: str = Field(
+            default="napcat_adapter:adapter:napcat_adapter",
+            description="适配器签名，用于获取 Cookie 等"
+        )
         default_visible: str = Field(default="all", description="默认可见范围: all/friends/self")
         enable_image: bool = Field(default=False, description="是否允许发送图片说说")
         max_image_count: int = Field(default=9, description="单条说说最大图片数")
